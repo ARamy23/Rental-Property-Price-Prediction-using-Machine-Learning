@@ -1,111 +1,155 @@
-# Import necessary libraries for the app
-import streamlit as st  # Streamlit is a library used to create interactive web apps for data science
-import pandas as pd  # Pandas is used for data manipulation and handling tabular data
-import numpy as np  # Numpy is a library for numerical operations, especially on arrays and matrices
-import psycopg2  # Psycopg2 is used to connect Python applications to a PostgreSQL database
-import joblib  # Joblib is used to save and load machine learning models
+# Import necessary libraries
+import streamlit as st
+import pandas as pd
+import numpy as np
+import psycopg2
+import joblib
+from sklearn.ensemble import RandomForestRegressor  # Using a Random Forest for training
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
 
-# This section sets up the Streamlit page configuration
+# Streamlit page configuration
 st.set_page_config(page_title="Rental Property Price Prediction", layout="wide")
-
-# Title of the Streamlit app
 st.title("Rental Property Price Prediction App")
 
-# Function to load the machine learning model from a file
+# Function to train the model (if `model.pkl` is missing)
+def train_model():
+    """
+    This function trains a Random Forest model using sample data,
+    then saves it as 'model.pkl' for future use.
+    """
+    st.write("Training model as 'model.pkl' not found...")
+    
+    # Sample data for demonstration (replace with real dataset if available)
+    data = {
+        "bedrooms": [1, 2, 3, 2, 3],
+        "bathrooms": [1, 2, 2, 1, 3],
+        "sqft": [500, 1500, 2000, 1200, 1800],
+        "locality": [1, 2, 2, 1, 3],  # Encoded locality for simplicity
+        "rent": [1000, 2000, 2500, 1800, 2700]
+    }
+    df = pd.DataFrame(data)
+    X = df.drop("rent", axis=1)
+    y = df["rent"]
+    
+    # Splitting the data
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    
+    # Training a Random Forest model
+    model = RandomForestRegressor()
+    model.fit(X_train, y_train)
+    joblib.dump(model, "model.pkl")  # Save the model
+    st.write("Model training complete and saved as 'model.pkl'.")
+    
+    # Check model accuracy
+    y_pred = model.predict(X_test)
+    mse = mean_squared_error(y_test, y_pred)
+    st.write(f"Model trained with Mean Squared Error: {mse:.2f}")
+
+# Function to load the model
 def load_model():
     """
-    This function loads the trained machine learning model
-    from a file using joblib. 
+    Loads the trained machine learning model from a file.
+    If 'model.pkl' is missing, trains a new model.
     """
-    return joblib.load("model.pkl")  # 'model.pkl' is the file where the ML model is saved
+    try:
+        model = joblib.load("model.pkl")
+        st.write("Loaded model successfully.")
+        return model
+    except FileNotFoundError:
+        st.warning("Model file 'model.pkl' not found. Training a new model...")
+        train_model()  # Train the model if not found
+        return joblib.load("model.pkl")
 
-# Load the model by calling the function
+# Load the model
 model = load_model()
 
 # Function to connect to the PostgreSQL database
 def connect_to_db():
     """
-    This function connects to the PostgreSQL database
-    using psycopg2 and returns the connection and cursor objects.
+    Connects to the PostgreSQL database using psycopg2.
     """
     try:
+        st.write("Connecting to the database...")
         conn = psycopg2.connect(
-            dbname="rental_db",  # Database name
-            user="postgres",     # Database user
-            password="your_password",  # Password (replace with actual password)
-            host="localhost",    # Server address, localhost means local machine
-            port="5432"          # PostgreSQL default port
+            dbname="rental_db",
+            user="postgres",
+            password="your_password",  # Replace with the actual password
+            host="localhost",
+            port="5432"
         )
+        st.write("Connected to the database successfully.")
         return conn, conn.cursor()
     except Exception as e:
-        st.error("Error connecting to the database: " + str(e))
+        st.error("Failed to connect to the database: " + str(e))
         return None, None
 
-# Function to fetch property data from the database
+# Function to fetch data from the database
 def fetch_data_from_db():
     """
-    Fetches property data from the PostgreSQL database
-    for use in the app. Assumes 'properties' table is available.
+    Fetches property data from the database.
     """
     conn, cursor = connect_to_db()
     if conn is None:
+        st.error("Database connection failed.")
         return None
+    
+    st.write("Fetching data from the database...")
     query = "SELECT * FROM properties;"
-    cursor.execute(query)
-    data = cursor.fetchall()
-    # Convert fetched data to a DataFrame for easy manipulation
-    df = pd.DataFrame(data, columns=[desc[0] for desc in cursor.description])
-    conn.close()
-    return df
+    try:
+        cursor.execute(query)
+        data = cursor.fetchall()
+        st.write("Data fetched successfully.")
+        # Convert fetched data to DataFrame
+        df = pd.DataFrame(data, columns=[desc[0] for desc in cursor.description])
+        conn.close()
+        return df
+    except Exception as e:
+        st.error("Error fetching data: " + str(e))
+        return None
 
-# Load data from the database
+# Load and display data
 data = fetch_data_from_db()
-
-# Display data in the app, if available
 if data is not None:
     st.subheader("Available Properties Data")
-    st.write(data)  # Shows the data in a table format in the Streamlit app
+    st.write(data)
 
-# Sidebar for user input to predict rental prices
+# Sidebar for input parameters
 st.sidebar.header("Input Parameters for Prediction")
 
-# Function to capture user input for prediction
+# Function to capture user inputs
 def user_input_features():
     """
-    Captures input values from the user for prediction.
-    Returns the inputs as a dictionary.
+    Captures user inputs for prediction.
     """
+    st.sidebar.write("Choose the features for prediction.")
     bedrooms = st.sidebar.slider("Number of Bedrooms", 1, 5, 2)
     bathrooms = st.sidebar.slider("Number of Bathrooms", 1, 5, 1)
     sqft = st.sidebar.slider("Square Footage", 500, 5000, 1000)
-    locality = st.sidebar.selectbox("Locality", options=["Area1", "Area2", "Area3"])  # Example areas
-    return {
+    locality = st.sidebar.selectbox("Locality", options=["Area1", "Area2", "Area3"])
+    locality_encoded = ["Area1", "Area2", "Area3"].index(locality) + 1
+    return pd.DataFrame([{
         "bedrooms": bedrooms,
         "bathrooms": bathrooms,
         "sqft": sqft,
-        "locality": locality
-    }
+        "locality": locality_encoded
+    }])
 
-# Get the user's inputs
+# Get user inputs and display
 input_data = user_input_features()
+st.write("User input for prediction:", input_data)
 
-# Convert inputs into a format suitable for the model (DataFrame)
-input_df = pd.DataFrame([input_data])
-
-# Predict rental price based on user inputs using the loaded model
+# Prediction function
 def predict_rent(model, input_df):
     """
-    Uses the ML model to predict the rental price based on input data.
+    Predicts the rental price based on user inputs.
     """
+    st.write("Running model prediction...")
     try:
-        prediction = model.predict(input_df)  # Predicts rent for given input
-        return prediction[0]  # Return the first (and only) prediction
+        prediction = model.predict(input_df)
+        st.success(f"Predicted Rental Price: ${prediction[0]:,.2f}")
     except Exception as e:
-        st.error("Error in making prediction: " + str(e))
-        return None
+        st.error("Prediction failed: " + str(e))
 
-# Show the prediction if model and inputs are valid
-predicted_price = predict_rent(model, input_df)
-if predicted_price is not None:
-    st.header("Predicted Rental Price")
-    st.write(f"${predicted_price:,.2f}")  # Displays prediction formatted as currency
+# Make prediction
+predict_rent(model, input_data)
